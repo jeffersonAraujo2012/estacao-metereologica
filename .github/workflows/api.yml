@@ -106,6 +106,8 @@ jobs:
           ssh_options=(-i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
             -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts"
             -o ConnectTimeout=15)
+          ssh-keygen -y -P '' -f "$ssh_dir/key" > "$ssh_dir/key.pub"
+          ssh-keygen -lf "$ssh_dir/key.pub"
           target="$EC2_USER@$EC2_HOST"
 
           compose_file="compose-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.yaml"
