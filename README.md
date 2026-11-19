@@ -39,7 +39,7 @@ Abrir `http://127.0.0.1:8000/docs` (Swagger). Rotas:
 | GET | `/api/v1/leituras?limite=20` | Histórico, até 100 leituras |
 | GET | `/api/v1/leituras/ultima?estacao_id=estacao-001` | Filtra por estação |
 | GET | `/api/v1/leituras/historico?periodo=24h` | Histórico agregado. Também aceita `periodo=7d` e o filtro opcional `estacao_id`. |
-| GET | `/api/v1/leituras/estatisticas?periodo=24h&metrica=temperatura_dht22_c` | Média, mediana, desvio padrão amostral e histograma da métrica selecionada. Também aceita `periodo=7d` e o filtro opcional `estacao_id`. |
+| GET | `/api/v1/leituras/estatisticas?periodo=24h&metrica=temperatura_dht22_c` | Estatísticas e distribuição da métrica selecionada. Para luminosidade, retorna um perfil horário. Também aceita `periodo=7d` e o filtro opcional `estacao_id`. |
 
 **Atenção:** `MONGODB_DATABASE` e `MONGODB_COLLECTION` são valores de EXEMPLO; ajuste para os nomes reais usados pelo consumidor Python. A ordenação supõe que `coletado_em` seja persistido de forma coerente, em ISO-8601 UTC ou `datetime` BSON, sem formatos misturados.
 
@@ -72,6 +72,10 @@ docker run --rm -i --network container:estacao-mongo-local \
 O painel consulta a leitura mais recente a cada 5 segundos e mostra um aviso quando algum campo de sensor está ausente. O histórico agrupa as últimas 24 horas em intervalos de 15 minutos e os últimos 7 dias em intervalos de uma hora. O navegador recebe no máximo 97 ou 169 pontos, respectivamente, contando intervalos parciais. Temperatura, umidade, pressão e luminosidade usam a média das medições válidas. Na série de chuva, `chuva_detectada` indica o último estado válido do intervalo. O valor é `0` (sem chuva), `1` (chovendo) ou `null` (sem leitura válida).
 
 O painel **Estatísticas do período** acompanha o seletor de medição e de período do histórico. A API calcula média, mediana e desvio padrão amostral sobre as leituras válidas originais. O histograma divide os valores em até dez faixas de mesma largura e exibe a quantidade em cada uma. Quando todas as leituras têm o mesmo valor, há uma única faixa. O desvio amostral exige duas leituras válidas. Para chuva, o painel mostra a contagem de leituras em cada estado do sensor.
+
+Para temperatura, umidade e pressão, a API ordena os valores válidos do período e descarta 2,5% das leituras em cada extremo antes de calcular as estatísticas e as faixas do histograma. A quantidade descartada por extremo é arredondada para baixo. Com menos de 40 leituras válidas, a amostra inteira é usada. As duas métricas de luminosidade e as contagens de chuva usam todas as suas leituras válidas.
+
+O **perfil horário de luminosidade** mostra a mediana como uma linha e os valores do mínimo ao máximo como uma faixa sombreada. Em **24 horas**, o gráfico segue a sequência das horas no período. Em **7 dias**, reúne as leituras da mesma hora do dia no horário de São Paulo. Horas sem leituras aparecem como lacunas.
 
 No perfil `dashboard`, o Nginx serve a interface e encaminha `/api/` ao FastAPI pela rede do Docker. Por exemplo, o histórico agregado também pode ser consultado em `http://127.0.0.1:8080/api/v1/leituras/historico?periodo=24h`.
 

@@ -52,12 +52,23 @@ class FaixaHistograma(BaseModel):
     quantidade: int
 
 
+class FaixaLuminosidade(BaseModel):
+    hora: int | datetime
+    amostras: int = 0
+    minimo: float | None = None
+    mediana: float | None = None
+    maximo: float | None = None
+
+
 class EstatisticasLeituras(BaseModel):
     amostras: int = 0
+    amostras_validas: int = 0
+    recorte_percentual_por_cauda: float | None = None
     media: float | None = None
     mediana: float | None = None
     desvio_padrao_amostral: float | None = None
     histograma: list[FaixaHistograma]
+    perfil_luminosidade: list[FaixaLuminosidade] | None = None
 
 
 def normalizar_leitura(documento: dict) -> Leitura:

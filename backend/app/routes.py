@@ -124,7 +124,9 @@ async def obter_estatisticas(
     fim = datetime.now(timezone.utc)
     inicio = fim - timedelta(days=1 if periodo == "24h" else 7)
     try:
-        estatisticas = await resumir_leituras(colecao, filtrar_periodo(inicio, fim, estacao_id), metrica)
+        estatisticas = await resumir_leituras(
+            colecao, filtrar_periodo(inicio, fim, estacao_id), metrica, periodo, inicio, fim,
+        )
     except PyMongoError as erro:
         raise HTTPException(status_code=503, detail="Estatísticas indisponíveis") from erro
 

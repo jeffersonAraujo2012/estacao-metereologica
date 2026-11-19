@@ -180,9 +180,16 @@ def test_estatisticas_de_medicao_numerica():
             assert (faixa["$lt"] - faixa["$gte"]).days == 7
             janela = pipeline[5]["$setWindowFields"]["output"]
             assert janela["posicao"] == {"$documentNumber": {}}
-            assert janela["desvio_padrao_amostral"]["$stdDevSamp"] == "$valor"
+            recorte = pipeline[6]["$match"]["$expr"]["$and"]
+            cauda = {"$floor": {"$divide": ["$amostras_validas", 40]}}
+            assert recorte == [
+                {"$gt": ["$posicao", cauda]},
+                {"$lte": ["$posicao", {"$subtract": ["$amostras_validas", cauda]}]},
+            ]
+            resumo = pipeline[7]["$setWindowFields"]["output"]
+            assert resumo["desvio_padrao_amostral"]["$stdDevSamp"] == "$valor"
             comum = {
-                "amostras": 4, "media": 3, "desvio_padrao_amostral": (20 / 3) ** 0.5,
+                "amostras_validas": 4, "media": 3, "desvio_padrao_amostral": (20 / 3) ** 0.5,
                 "minimo": 0, "maximo": 6, "quantidade": 1,
             }
             return CursorFake([
@@ -200,11 +207,56 @@ def test_estatisticas_de_medicao_numerica():
     assert resposta.status_code == 200
     dados = resposta.json()
     assert dados["amostras"] == 4
+    assert dados["amostras_validas"] == 4
+    assert dados["recorte_percentual_por_cauda"] == 2.5
     assert dados["media"] == 3
     assert dados["mediana"] == 3
     assert dados["desvio_padrao_amostral"] == pytest.approx((20 / 3) ** 0.5)
     assert [faixa["quantidade"] for faixa in dados["histograma"]] == [1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
     assert dados["histograma"][-1]["fim"] == 6
+
+
+@pytest.mark.parametrize(("metrica", "periodo"), [("luminosidade_pct", "24h"), ("ldr_bruto", "7d")])
+def test_perfil_de_luminosidade_preserva_extremos_e_lacunas(metrica, periodo):
+    class ColecaoLuminosidade:
+        async def aggregate(self, pipeline, *, allowDiskUse, maxTimeMS):
+            assert allowDiskUse and maxTimeMS == 15000
+            projecao = pipeline[3]["$project"]
+            assert projecao["valor"]["$cond"][1] == {"$toDouble": f"${metrica}"}
+            if periodo == "7d":
+                assert projecao["hora"] == {"$hour": {"date": "$instante", "timezone": "America/Sao_Paulo"}}
+                self.hora = 4
+            else:
+                assert projecao["hora"] == {"$dateTrunc": {"date": "$instante", "unit": "hour"}}
+                inicio = pipeline[0]["$match"]["$or"][0]["coletado_em"]["$gte"]
+                self.hora = inicio.replace(minute=0, second=0, microsecond=0) + timedelta(hours=4)
+            janela = pipeline[5]["$setWindowFields"]["output"]
+            assert janela["posicao"] == {"$documentNumber": {}}
+            assert pipeline[6]["$setWindowFields"]["partitionBy"] == "$hora"
+            assert pipeline[7]["$group"]["minimo"] == {"$min": "$valor"}
+            assert pipeline[7]["$group"]["maximo"] == {"$max": "$valor"}
+            comum = {
+                "amostras_validas": 80, "media": 50, "desvio_padrao_amostral": 50.3,
+                "amostras": 80, "minimo": 0, "mediana": 50, "maximo": 100,
+            }
+            return CursorFake([
+                {**comum, "_id": self.hora, "soma_centrais": 100, "quantidade_centrais": 2},
+            ])
+
+    app.dependency_overrides[get_collection] = lambda: ColecaoLuminosidade()
+    with TestClient(app) as client:
+        resposta = client.get("/api/v1/leituras/estatisticas", params={"metrica": metrica, "periodo": periodo})
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["amostras"] == dados["amostras_validas"] == 80
+    assert dados["recorte_percentual_por_cauda"] is None
+    assert dados["histograma"] == []
+    perfil = dados["perfil_luminosidade"]
+    assert len(perfil) in ((24,) if periodo == "7d" else (24, 25))
+    assert perfil[0]["amostras"] == 0 and perfil[0]["minimo"] is None
+    assert perfil[4]["minimo"] == 0 and perfil[4]["maximo"] == 100
+    assert perfil[4]["mediana"] == 50 and perfil[4]["amostras"] == 80
+    assert isinstance(perfil[4]["hora"], int if periodo == "7d" else str)
 
 
 def test_estatisticas_de_chuva_contam_estados():
@@ -219,6 +271,8 @@ def test_estatisticas_de_chuva_contam_estados():
     assert resposta.status_code == 200
     dados = resposta.json()
     assert dados["amostras"] == 8
+    assert dados["amostras_validas"] == 8
+    assert dados["recorte_percentual_por_cauda"] is None
     assert dados["media"] is None
     assert dados["histograma"] == [
         {"inicio": 0, "fim": 0, "quantidade": 8},

@@ -24,12 +24,22 @@ export type Ponto = Record<CampoNumerico, number | null> & {
 }
 export type Historico = { inicio: string; fim: string; intervalo_minutos: number; pontos: Ponto[] }
 export type FaixaHistograma = { inicio: number; fim: number; quantidade: number }
+export type FaixaLuminosidade = {
+  hora: string | number
+  amostras: number
+  minimo: number | null
+  mediana: number | null
+  maximo: number | null
+}
 export type Estatisticas = {
   amostras: number
+  amostras_validas: number
+  recorte_percentual_por_cauda: number | null
   media: number | null
   mediana: number | null
   desvio_padrao_amostral: number | null
   histograma: FaixaHistograma[]
+  perfil_luminosidade?: FaixaLuminosidade[] | null
 }
 
 export const metricasDoGrafico = [
@@ -56,22 +66,59 @@ export async function consultar<T>(rota: string, signal: AbortSignal): Promise<T
   return resposta.json() as Promise<T>
 }
 
-export function estatisticasDemo(pontos: Ponto[], campo: CampoHistorico): Estatisticas {
-  const valores = pontos.map(ponto => ponto[campo]).filter(valor => valor !== null).sort((a, b) => a - b)
+function medianaOrdenada(valores: number[]) {
+  const n = valores.length
+  return (valores[Math.floor((n - 1) / 2)] + valores[Math.floor(n / 2)]) / 2
+}
+
+export function estatisticasDemo(pontos: Ponto[], campo: CampoHistorico, periodo: Periodo): Estatisticas {
+  const validos = pontos.map(ponto => ponto[campo]).filter(valor => valor !== null).sort((a, b) => a - b)
+  const luminosidade = campo === 'luminosidade_pct' || campo === 'ldr_bruto'
+  const recorte = campo === 'chuva_detectada' || luminosidade ? null : 2.5
+  const cauda = Math.floor(validos.length * (recorte ?? 0) / 100)
+  const valores = validos.slice(cauda, validos.length - cauda)
   const amostras = valores.length
+  const base = { amostras, amostras_validas: validos.length, recorte_percentual_por_cauda: recorte }
   if (campo === 'chuva_detectada') return {
-    amostras, media: null, mediana: null, desvio_padrao_amostral: null,
+    ...base, media: null, mediana: null, desvio_padrao_amostral: null,
     histograma: [0, 1].map(estado => ({
       inicio: estado, fim: estado, quantidade: valores.filter(valor => valor === estado).length,
     })),
   }
   if (amostras === 0) return {
-    amostras, media: null, mediana: null, desvio_padrao_amostral: null, histograma: [],
+    ...base, media: null, mediana: null, desvio_padrao_amostral: null, histograma: [],
   }
 
   const media = valores.reduce((soma, valor) => soma + valor, 0) / amostras
-  const mediana = (valores[Math.floor((amostras - 1) / 2)] + valores[Math.floor(amostras / 2)]) / 2
   const desvios = valores.reduce((soma, valor) => soma + (valor - media) ** 2, 0)
+  const resumo = {
+    ...base, media, mediana: medianaOrdenada(valores),
+    desvio_padrao_amostral: amostras > 1 ? Math.sqrt(desvios / (amostras - 1)) : null,
+  }
+  if (luminosidade) {
+    const grupos = new Map<string | number, number[]>()
+    if (periodo === '7d') for (let h = 0; h < 24; h++) grupos.set(h, [])
+    for (const ponto of pontos) {
+      const instante = Date.parse(ponto.inicio)
+      const chave = periodo === '7d' ? Number(hora(instante).slice(0, 2))
+        : new Date(Math.floor(instante / 3_600_000) * 3_600_000).toISOString()
+      const grupo = grupos.get(chave) ?? []
+      if (ponto[campo] !== null) grupo.push(ponto[campo])
+      grupos.set(chave, grupo)
+    }
+    return {
+      ...resumo, histograma: [],
+      perfil_luminosidade: Array.from(grupos, ([horario, grupo]) => {
+        grupo.sort((a, b) => a - b)
+        return {
+          hora: horario, amostras: grupo.length,
+          minimo: grupo[0] ?? null, mediana: grupo.length ? medianaOrdenada(grupo) : null,
+          maximo: grupo[grupo.length - 1] ?? null,
+        }
+      }),
+    }
+  }
+
   const minimo = valores[0]
   const maximo = valores[amostras - 1]
   const total = minimo === maximo ? 1 : 10
@@ -85,10 +132,7 @@ export function estatisticasDemo(pontos: Ponto[], campo: CampoHistorico): Estati
     const indice = largura ? Math.min(total - 1, Math.floor((valor - minimo) / largura)) : 0
     histograma[indice].quantidade += 1
   }
-  return {
-    amostras, media, mediana, histograma,
-    desvio_padrao_amostral: amostras > 1 ? Math.sqrt(desvios / (amostras - 1)) : null,
-  }
+  return { ...resumo, histograma }
 }
 
 export function demonstracao(periodo: Periodo): { leitura: Leitura; historico: Historico } {

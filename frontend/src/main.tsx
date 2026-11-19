@@ -78,8 +78,8 @@ function App() {
   const resultadoHistorico = useConsulta<Historico>(`historico?periodo=${periodo}`, intervaloHistorico, !demo, revisao)
   const resultadoEstatisticas = useConsulta<Estatisticas>(`estatisticas?periodo=${periodo}&metrica=${campo}`, intervaloHistorico, !demo, revisao)
   const estatisticas = useMemo(
-    () => amostra ? estatisticasDemo(amostra.historico.pontos, campo) : resultadoEstatisticas?.dados,
-    [amostra, campo, resultadoEstatisticas],
+    () => amostra ? estatisticasDemo(amostra.historico.pontos, campo, periodo) : resultadoEstatisticas?.dados,
+    [amostra, campo, periodo, resultadoEstatisticas],
   )
   const leitura = amostra?.leitura ?? resultadoAtual?.dados
   const historico = amostra?.historico ?? resultadoHistorico?.dados
