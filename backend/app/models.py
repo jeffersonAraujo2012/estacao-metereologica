@@ -20,6 +20,25 @@ class Leitura(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class IntervaloHistorico(BaseModel):
+    inicio: datetime
+    amostras: int
+    temperatura_dht22_c: float | None
+    temperatura_bmp180_c: float | None
+    umidade_pct: float | None
+    pressao_hpa: float | None
+    luminosidade_pct: float | None
+    ldr_bruto: float | None
+    chuva_detectada_pct: float | None
+
+
+class HistoricoLeituras(BaseModel):
+    inicio: datetime
+    fim: datetime
+    intervalo_minutos: int
+    pontos: list[IntervaloHistorico]
+
+
 def normalizar_leitura(documento: dict) -> Leitura:
     # O ObjectId não é diretamente serializável em JSON.
     dados = {**documento, "id": str(documento["_id"])}

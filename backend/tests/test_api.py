@@ -1,5 +1,9 @@
+from datetime import datetime, timezone
+
+import pytest
 from bson import ObjectId
 from fastapi.testclient import TestClient
+from pymongo.errors import PyMongoError
 
 from app.db import get_collection
 from app.main import app
@@ -106,3 +110,56 @@ def test_limite_invalido():
     with criar_cliente(DOCUMENTOS) as client:
         resposta = client.get("/api/v1/leituras?limite=101")
     assert resposta.status_code == 422
+
+
+@pytest.mark.parametrize(("periodo", "dias", "intervalo"), [("24h", 1, 15), ("7d", 7, 60)])
+def test_historico_retorna_medias_e_preserva_nulos(periodo, dias, intervalo):
+    class ColecaoHistorico:
+        async def aggregate(self, pipeline, *, maxTimeMS):
+            filtro = pipeline[0]["$match"]
+            assert filtro["estacao_id"] == "estacao-001"
+            faixa = filtro["$or"][0]["coletado_em"]
+            assert (faixa["$lt"] - faixa["$gte"]).days == dias
+            assert pipeline[3]["$group"]["_id"]["$dateTrunc"]["binSize"] == intervalo
+            assert maxTimeMS == 5000
+            return CursorFake([{
+                "inicio": datetime.now(timezone.utc),
+                "amostras": 2,
+                "temperatura_dht22_c": 23.8,
+                "temperatura_bmp180_c": None,
+                "umidade_pct": 81.8,
+                "pressao_hpa": None,
+                "luminosidade_pct": None,
+                "ldr_bruto": None,
+                "chuva_detectada_pct": 50.0,
+            }])
+
+    app.dependency_overrides[get_collection] = lambda: ColecaoHistorico()
+    with TestClient(app) as client:
+        resposta = client.get("/api/v1/leituras/historico", params={
+            "periodo": periodo, "estacao_id": "estacao-001",
+        })
+    assert resposta.status_code == 200
+    assert resposta.headers["Cache-Control"] == "public, max-age=60"
+    dados = resposta.json()
+    assert dados["intervalo_minutos"] == intervalo
+    assert dados["pontos"][0]["temperatura_dht22_c"] == 23.8
+    assert dados["pontos"][0]["pressao_hpa"] is None
+    assert dados["pontos"][0]["chuva_detectada_pct"] == 50
+
+
+def test_historico_periodo_invalido():
+    with criar_cliente([]) as client:
+        resposta = client.get("/api/v1/leituras/historico?periodo=30d")
+    assert resposta.status_code == 422
+
+
+def test_historico_indisponivel():
+    class ColecaoIndisponivel:
+        async def aggregate(self, *args, **kwargs):
+            raise PyMongoError("sem conexão")
+
+    app.dependency_overrides[get_collection] = lambda: ColecaoIndisponivel()
+    with TestClient(app) as client:
+        resposta = client.get("/api/v1/leituras/historico")
+    assert resposta.status_code == 503

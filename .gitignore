@@ -25,3 +25,6 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+
+# Frontend
+node_modules/

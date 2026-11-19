@@ -8,5 +8,22 @@ services:
       - mongo_local_data:/data/db
     restart: unless-stopped
 
+  api-local:
+    profiles: [dashboard]
+    image: estacao-api:local
+    build: ../backend
+    environment:
+      MONGODB_URI: mongodb://mongodb-local:27017
+    depends_on:
+      - mongodb-local
+
+  dashboard:
+    profiles: [dashboard]
+    build: ../frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api-local
+
 volumes:
   mongo_local_data:

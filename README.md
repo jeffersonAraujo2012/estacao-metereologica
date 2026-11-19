@@ -1,13 +1,14 @@
 # Estação meteorológica — PD-II UNIP
 
-Projeto integrador em evolução. **Este pacote contém somente o backend FastAPI e a infraestrutura para CI/CD**; não substitui o firmware, o consumidor Python, o RabbitMQ nem o MongoDB já existentes na EC2.
+Projeto integrador com a API FastAPI, o dashboard meteorológico e os arquivos Docker para desenvolvimento local e implantação da API na EC2. O firmware, o consumidor Python, o RabbitMQ e o MongoDB em produção executam em sua infraestrutura existente.
 
 ## Arquitetura
 
-`ESP32 → RabbitMQ (MQTT/TLS) → consumidor Python (validação) → MongoDB → FastAPI → dashboard (futuro)`
+`ESP32 → RabbitMQ (MQTT/TLS) → consumidor Python (validação) → MongoDB → FastAPI → dashboard`
 
 - FastAPI: API de consulta (leitura) ao MongoDB. O consumidor permanece como único responsável pela ingestão MQTT.
 - PyMongo Async: driver assíncrono oficial.
+- React, TypeScript e Vite: [dashboard meteorológico](#dashboard-local).
 - GitHub Actions: testes, build da imagem e publicação GHCR; deploy EC2 ativado por variável de repositório.
 
 ## 1. Executar localmente no Ubuntu / VS Code
@@ -36,6 +37,7 @@ Abrir `http://127.0.0.1:8000/docs` (Swagger). Rotas:
 | GET | `/api/v1/leituras/ultima` | Medição mais recente |
 | GET | `/api/v1/leituras?limite=20` | Histórico, até 100 leituras |
 | GET | `/api/v1/leituras/ultima?estacao_id=estacao-001` | Filtra por estação |
+| GET | `/api/v1/leituras/historico?periodo=24h` | Histórico agregado. Também aceita `periodo=7d` e o filtro opcional `estacao_id`. |
 
 **Atenção:** `MONGODB_DATABASE` e `MONGODB_COLLECTION` são valores de EXEMPLO; ajuste para os nomes reais usados pelo consumidor Python. A ordenação supõe que `coletado_em` seja persistido de forma coerente, em ISO-8601 UTC ou `datetime` BSON, sem formatos misturados.
 
@@ -47,6 +49,29 @@ curl http://127.0.0.1:8000/ready
 curl 'http://127.0.0.1:8000/api/v1/leituras/ultima'
 curl 'http://127.0.0.1:8000/api/v1/leituras?limite=10'
 ```
+
+### Dashboard local
+
+Na raiz do repositório, com o Docker Compose em execução:
+
+```bash
+docker compose -f infra/compose.local.yaml --profile dashboard up -d --build
+```
+
+Se você já subiu o MongoDB local com `-p estacao-local`, use o mesmo `-p estacao-local` nesse comando para reaproveitar o contêiner e o volume.
+
+Abra `http://127.0.0.1:8080`. Para ver o layout com dados fictícios, abra `http://127.0.0.1:8080/?demo=1`. Para testar o fluxo completo com o MongoDB local, insira três leituras fictícias pelo seed:
+
+```bash
+docker run --rm -i --network container:estacao-mongo-local \
+  --entrypoint python estacao-api:local - < backend/scripts/seed_demo.py
+```
+
+O painel consulta a leitura mais recente a cada 5 segundos e mostra um aviso quando algum campo de sensor está ausente. O histórico agrupa as últimas 24 horas em intervalos de 15 minutos e os últimos 7 dias em intervalos de uma hora. O navegador recebe no máximo 97 ou 169 pontos, respectivamente, contando intervalos parciais. Nas séries numéricas, o valor do ponto é a média das medições válidas. Na série de chuva, é a porcentagem de leituras válidas que detectaram chuva.
+
+No perfil `dashboard`, o Nginx serve a interface e encaminha `/api/` ao FastAPI pela rede do Docker. Por exemplo, o histórico agregado também pode ser consultado em `http://127.0.0.1:8080/api/v1/leituras/historico?periodo=24h`.
+
+O mapa interativo usa o OpenStreetMap e indica uma posição aproximada no centro de São Paulo. Para coleções grandes, crie um índice em `coletado_em` com um usuário administrativo. Se a consulta usar o filtro de estação com frequência, o índice composto `{estacao_id: 1, coletado_em: 1}` também pode atender esse filtro. Datas em texto devem seguir ISO 8601 em UTC com prefixo `AAAA-MM-DDTHH:mm:ss`.
 
 ## 2. Conectar ao MongoDB real da EC2
 
@@ -92,8 +117,7 @@ A API será publicada em `127.0.0.1:8000` **no host EC2**, e não diretamente na
 ## 5. Próximas melhorias
 
 - Conferir o schema exato do MongoDB real, nomes da coleção e índices (`estacao_id`, `coletado_em`).
-- Criar endpoints agregados para gráficos de temperatura, umidade e pressão.
-- Criar dashboard React + TypeScript + Vite, com histórico, indicadores e mapa.
+- Publicar o dashboard com HTTPS e integrar sua origem à API de produção.
 - Evoluir segurança da esteira com políticas e permissões mínimas.
 
 _Dados do seed são simulados e não representam leituras reais._
