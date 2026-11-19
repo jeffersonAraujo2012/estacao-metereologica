@@ -32,7 +32,14 @@ export function HistoryChart({ historico, campo, unidade, nome, periodo, demo }:
   const area = largura - margem.esquerda - margem.direita
   const pontoAtivo = selecionado === null ? undefined : serie[selecionado]
   const temValores = valores.length > 0
+  const chuva = campo === 'chuva_detectada'
   const rotuloPonto = (instante: number) => `${dia(instante)} às ${hora(instante)}`
+
+  function formatarValor(valor: number | null, incluirUnidade = false) {
+    if (valor === null) return 'Sem leitura'
+    if (chuva) return valor === 1 ? '1 (Chovendo)' : '0 (Sem chuva)'
+    return incluirUnidade && unidade ? `${numero(valor)} ${unidade}` : numero(valor)
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -58,9 +65,9 @@ export function HistoryChart({ historico, campo, unidade, nome, periodo, demo }:
     const amplitude = Math.max(maximo - minimo, Math.abs(maximo) * 0.015, 1)
     const bruto = amplitude * 1.25 / 4
     const magnitude = 10 ** Math.floor(Math.log10(bruto))
-    const passo = ([1, 2, 2.5, 5, 10].find(valor => valor >= bruto / magnitude) ?? 10) * magnitude
-    const piso = Math.floor((minimo - amplitude * 0.07) / passo) * passo
-    const teto = Math.ceil((maximo + amplitude * 0.07) / passo) * passo
+    const passo = chuva ? 1 : ([1, 2, 2.5, 5, 10].find(valor => valor >= bruto / magnitude) ?? 10) * magnitude
+    const piso = chuva ? 0 : Math.floor((minimo - amplitude * 0.07) / passo) * passo
+    const teto = chuva ? 1 : Math.ceil((maximo + amplitude * 0.07) / passo) * passo
     const base = altura - margem.base
     const x = (indice: number) => margem.esquerda + (serie.length === 1 ? area / 2 : indice * area / (serie.length - 1))
     const y = (valor: number) => base - (valor - piso) * (base - margem.topo) / (teto - piso)
@@ -98,7 +105,12 @@ export function HistoryChart({ historico, campo, unidade, nome, periodo, demo }:
       const [primeiroX, primeiroY] = trecho[0]
       contexto.beginPath()
       contexto.moveTo(primeiroX, primeiroY)
-      for (const [px, py] of trecho.slice(1)) contexto.lineTo(px, py)
+      let anteriorY = primeiroY
+      for (const [px, py] of trecho.slice(1)) {
+        if (chuva) contexto.lineTo(px, anteriorY)
+        contexto.lineTo(px, py)
+        anteriorY = py
+      }
       contexto.strokeStyle = '#087f68'
       contexto.lineWidth = 2
       contexto.lineJoin = 'round'
@@ -166,14 +178,14 @@ export function HistoryChart({ historico, campo, unidade, nome, periodo, demo }:
           id="ponto-historico" type="range" min={0} max={serie.length - 1}
           value={selecionado ?? serie.length - 1}
           aria-valuetext={pontoAtivo
-            ? `${rotuloPonto(pontoAtivo.instante)}, ${pontoAtivo.valor === null ? 'sem leitura' : `${numero(pontoAtivo.valor)} ${unidade}`}`
+            ? `${rotuloPonto(pontoAtivo.instante)}, ${formatarValor(pontoAtivo.valor, true)}`
             : rotuloPonto(serie[serie.length - 1].instante)}
           onChange={event => selecionar(Number(event.target.value))}
         />
         <output htmlFor="ponto-historico">
           {pontoAtivo
-            ? `${rotuloPonto(pontoAtivo.instante)} · ${pontoAtivo.valor === null ? 'Sem leitura' : `${numero(pontoAtivo.valor)} ${unidade}`}`
-            : `Horário de São Paulo`}
+            ? `${rotuloPonto(pontoAtivo.instante)} · ${formatarValor(pontoAtivo.valor, true)}`
+            : chuva ? '0 = Sem chuva · 1 = Chovendo' : 'Horário de São Paulo'}
         </output>
       </div>
       <details className="dados">
@@ -185,7 +197,7 @@ export function HistoryChart({ historico, campo, unidade, nome, periodo, demo }:
             {serie.filter(ponto => ponto.amostras !== undefined).map(({ instante, valor, amostras }) => (
               <tr key={instante}>
                 <th scope="row">{rotuloPonto(instante)}</th>
-                <td>{valor === null ? 'Sem leitura' : numero(valor)}</td>
+                <td>{formatarValor(valor)}</td>
                 {!demo && <td>{amostras}</td>}
               </tr>
             ))}

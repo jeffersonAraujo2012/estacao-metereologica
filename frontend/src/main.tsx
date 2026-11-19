@@ -164,7 +164,7 @@ function App() {
               <span className="indicador-icone" aria-hidden="true">☂</span>
               <h3>Detecção de chuva</h3>
               <p className="valor valor-chuva">{leitura?.chuva_detectada == null ? <span className="sem-valor">Sem leitura</span>
-                : leitura.chuva_detectada ? 'Detectada' : 'Sem chuva'}</p>
+                : leitura.chuva_detectada ? 'Chovendo' : 'Sem chuva'}</p>
               <p className="sensor">Sensor de chuva</p>
             </article>
           </div>
@@ -183,7 +183,7 @@ function App() {
           <section id="historico" className="painel" aria-labelledby="titulo-historico">
             <header className="painel-topo">
               <div><h2 id="titulo-historico">Histórico de medições</h2>
-              <p>{campo === 'chuva_detectada_pct' ? 'Proporção de leituras com chuva' : 'Média das medições'} a cada {periodo === '24h' ? '15 minutos' : 'hora'}</p></div>
+              <p>{campo === 'chuva_detectada' ? 'Último estado válido' : 'Média das medições'} a cada {periodo === '24h' ? '15 minutos' : 'hora'}</p></div>
               <div className="periodos" role="group" aria-label="Período do histórico">
                 <button type="button" aria-pressed={periodo === '24h'} onClick={() => setPeriodo('24h')}>24 horas</button>
                 <button type="button" aria-pressed={periodo === '7d'} onClick={() => setPeriodo('7d')}>7 dias</button>

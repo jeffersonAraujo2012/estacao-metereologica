@@ -1,6 +1,6 @@
 # Estação meteorológica — PD-II UNIP
 
-Projeto integrador com a API FastAPI, o dashboard meteorológico e os arquivos Docker para desenvolvimento local e implantação da API na EC2. O firmware, o consumidor Python, o RabbitMQ e o MongoDB em produção executam em sua infraestrutura existente.
+Projeto integrador com a API FastAPI, o dashboard meteorológico e os arquivos Docker para desenvolvimento local e implantação na EC2. O firmware, o consumidor Python, o RabbitMQ e o MongoDB em produção executam em sua infraestrutura existente.
 
 ## Arquitetura
 
@@ -9,7 +9,8 @@ Projeto integrador com a API FastAPI, o dashboard meteorológico e os arquivos D
 - FastAPI: API de consulta (leitura) ao MongoDB. O consumidor permanece como único responsável pela ingestão MQTT.
 - PyMongo Async: driver assíncrono oficial.
 - React, TypeScript e Vite: [dashboard meteorológico](#dashboard-local).
-- GitHub Actions: testes, build da imagem e publicação GHCR; deploy EC2 ativado por variável de repositório.
+- Docker Compose: MongoDB local para desenvolvimento e configuração para implantar a API e o dashboard na EC2.
+- GitHub Actions: testes automatizados, publicação de imagens no GHCR e deploy opcional na EC2. [Configurar o CI/CD](#4-cicd-e-implantação-na-ec2)
 
 ## 1. Executar localmente no Ubuntu / VS Code
 
@@ -67,7 +68,7 @@ docker run --rm -i --network container:estacao-mongo-local \
   --entrypoint python estacao-api:local - < backend/scripts/seed_demo.py
 ```
 
-O painel consulta a leitura mais recente a cada 5 segundos e mostra um aviso quando algum campo de sensor está ausente. O histórico agrupa as últimas 24 horas em intervalos de 15 minutos e os últimos 7 dias em intervalos de uma hora. O navegador recebe no máximo 97 ou 169 pontos, respectivamente, contando intervalos parciais. Nas séries numéricas, o valor do ponto é a média das medições válidas. Na série de chuva, é a porcentagem de leituras válidas que detectaram chuva.
+O painel consulta a leitura mais recente a cada 5 segundos e mostra um aviso quando algum campo de sensor está ausente. O histórico agrupa as últimas 24 horas em intervalos de 15 minutos e os últimos 7 dias em intervalos de uma hora. O navegador recebe no máximo 97 ou 169 pontos, respectivamente, contando intervalos parciais. Temperatura, umidade, pressão e luminosidade usam a média das medições válidas. Na série de chuva, `chuva_detectada` indica o último estado válido do intervalo. O valor é `0` (sem chuva), `1` (chovendo) ou `null` (sem leitura válida).
 
 No perfil `dashboard`, o Nginx serve a interface e encaminha `/api/` ao FastAPI pela rede do Docker. Por exemplo, o histórico agregado também pode ser consultado em `http://127.0.0.1:8080/api/v1/leituras/historico?periodo=24h`.
 
@@ -84,7 +85,7 @@ Em produção, a API será conectada à **mesma rede Docker do MongoDB**, consul
 ```bash
 git init
 git add .
-git commit -m "feat: adiciona API meteorologica com testes e pipeline"
+git commit -m "feat: adiciona API meteorologica com testes"
 git branch -M main
 # Crie um repositório vazio no GitHub e use a URL exibida lá:
 git remote add origin <URL_REAL_DO_REPOSITORIO>
@@ -93,31 +94,31 @@ git push -u origin main
 
 Os arquivos `.env` estão no `.gitignore` e não devem entrar no Git. Não inclua credenciais MQTT, Mongo, AWS ou chaves privadas em commits.
 
-## 4. CI / CD
+## 4. CI/CD e implantação na EC2
 
-O workflow `.github/workflows/api.yml`:
+O [guia detalhado de CI/CD](GUIA_CI_CD.md) mostra onde obter cada credencial, como preparar a EC2 e como validar ou reverter um deploy.
 
-1. Em PR: instala dependências e executa testes com `pytest`.
-2. Em push para `main`: testa, constrói imagem Docker e publica em `ghcr.io/<owner>/<repo>:api-latest`.
-3. **Somente quando** a variável de repositório `ENABLE_EC2_DEPLOY` for `true`: atualiza na EC2 **apenas** o serviço `estacao-api`.
+O workflow **API e Dashboard** tem três etapas. [Arquivo do GitHub Actions](.github/workflows/api.yml)
 
-**Configuração necessária antes do deploy:**
+| Etapa | Quando roda | Resultado |
+| --- | --- | --- |
+| Validação | Pull requests, pushes para `main` e execuções manuais | Executa o `pytest` no backend e verifica os tipos e o build do frontend. |
+| Publicação | Pushes e execuções manuais em `main`, após as duas validações | Publica as imagens Linux AMD64 da API e do dashboard em dois pacotes no GHCR, cada uma com uma tag do commit e uma tag móvel. |
+| Deploy | Após a publicação, se `ENABLE_EC2_DEPLOY=true` | Atualiza `api` e `frontend` na EC2, verifica `/ready`, abre o dashboard e testa uma consulta pelo proxy do frontend. |
 
-- Criar `/opt/estacao-api` na EC2 com permissão de escrita para o usuário SSH.
-- Copiar `infra/ec2.env.example` para `/opt/estacao-api/.env` **no servidor** e ajustar MongoDB (host, banco, coleção) e `EXTERNAL_DOCKER_NETWORK` para valores existentes. Não usar esse arquivo do exemplo sem ajustes.
-- Garantir que o contêiner MongoDB existente esteja conectado à rede Docker indicada.
-- Verificar que Docker Compose está instalado na EC2 e o usuário SSH pode executar `docker`.
-- Configurar segredos GitHub Actions: `EC2_HOST`, `EC2_USER`, `EC2_SSH_PRIVATE_KEY` e `EC2_SSH_KNOWN_HOSTS` (obtido após verificação independente da chave pública do servidor).
-- Caso o pacote GHCR seja privado, autenticar o Docker **na EC2** com token de leitura de pacote, ou tornar o pacote público se adequado.
-- Autorizar SSH do runner GitHub à EC2 conforme política de firewall; não abra desnecessariamente portas MongoDB/RabbitMQ na Internet.
-- Finalmente configurar a variável GitHub Actions `ENABLE_EC2_DEPLOY=true`.
+Para ativar o deploy automático:
 
-A API será publicada em `127.0.0.1:8000` **no host EC2**, e não diretamente na Internet. Para o dashboard público, acrescentar posteriormente um reverse proxy com HTTPS, autenticação/configuração de acesso conforme necessidade e CORS configurado para o domínio real.
+1. Na EC2, prepare `/opt/estacao-api` com permissão de escrita para o usuário SSH e crie `/opt/estacao-api/.env` como no exemplo abaixo. Use a rede Docker existente do MongoDB e uma URI com as credenciais da aplicação. O usuário SSH precisa executar Docker via `sudo -n` e o servidor precisa ter Docker Compose e `curl`.
+2. No GitHub, em **Settings → Secrets and variables → Actions**, cadastre `EC2_HOST`, `EC2_USER`, `EC2_SSH_PRIVATE_KEY` e `EC2_SSH_KNOWN_HOSTS`. Se a chave privada estiver cifrada, cadastre também `EC2_SSH_KEY_PASSPHRASE`. Use a entrada `known_hosts` da EC2 conferida por um canal confiável.
+3. Se houver pacotes GHCR privados, autentique o Docker da EC2 via `sudo docker login ghcr.io` com uma conta e um token com acesso de leitura aos pacotes. Confirme que o runner do GitHub pode conectar via SSH à EC2.
+4. Defina `ENABLE_EC2_DEPLOY=true` e execute o workflow em `main` para baixar e implantar o par de imagens do mesmo commit.
+
+Após o deploy, acesse o dashboard em `http://IP_PUBLICO_DA_EC2`. No Security Group da instância, adicione uma regra de entrada **TCP 80** com a origem desejada. A API escuta em `127.0.0.1:8000` e o dashboard encaminha `/api/` pela rede Docker. O guia também descreve como usar um túnel SSH e como implantar manualmente. [Guia de CI/CD](GUIA_CI_CD.md)
 
 ## 5. Próximas melhorias
 
 - Conferir o schema exato do MongoDB real, nomes da coleção e índices (`estacao_id`, `coletado_em`).
-- Publicar o dashboard com HTTPS e integrar sua origem à API de produção.
+- Configurar domínio e HTTPS para o dashboard.
 - Evoluir segurança da esteira com políticas e permissões mínimas.
 
 _Dados do seed são simulados e não representam leituras reais._

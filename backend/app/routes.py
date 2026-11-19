@@ -72,21 +72,21 @@ async def obter_historico(
     )
     pipeline = [
         {"$match": filtro},
-        {"$set": {"instante": {
-            "$convert": {"input": "$coletado_em", "to": "date", "onError": None, "onNull": None},
-        }}},
+        {"$set": {
+            "instante": {
+                "$convert": {"input": "$coletado_em", "to": "date", "onError": None, "onNull": None},
+            },
+            "chuva_valida": {"$eq": [{"$type": "$chuva_detectada"}, "bool"]},
+        }},
         {"$match": {"instante": {"$gte": inicio, "$lt": fim}}},
         {"$group": {
             "_id": {"$dateTrunc": {"date": "$instante", "unit": "minute", "binSize": intervalo}},
             "amostras": {"$sum": 1},
             **{campo: {"$avg": f"${campo}"} for campo in campos},
-            "chuva_detectada_pct": {"$avg": {"$switch": {
-                "branches": [
-                    {"case": {"$eq": ["$chuva_detectada", True]}, "then": 100},
-                    {"case": {"$eq": ["$chuva_detectada", False]}, "then": 0},
-                ],
-                "default": None,
-            }}},
+            "chuva_detectada": {"$top": {
+                "sortBy": {"chuva_valida": -1, "instante": -1, "_id": -1},
+                "output": {"$cond": ["$chuva_valida", {"$toInt": "$chuva_detectada"}, None]},
+            }},
         }},
         {"$sort": {"_id": 1}},
         {"$project": {
@@ -94,7 +94,7 @@ async def obter_historico(
             "inicio": "$_id",
             "amostras": 1,
             **dict.fromkeys(campos, 1),
-            "chuva_detectada_pct": 1,
+            "chuva_detectada": 1,
         }},
     ]
     try:

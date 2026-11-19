@@ -10,19 +10,23 @@ export const metricas = [
 ] as const
 
 export type CampoNumerico = typeof metricas[number]['campo']
-export type CampoHistorico = CampoNumerico | 'chuva_detectada_pct'
+export type CampoHistorico = CampoNumerico | 'chuva_detectada'
 export type Leitura = Record<CampoNumerico, number | null> & {
   id: string
   coletado_em: string | null
   chuva_detectada: boolean | null
 }
 
-export type Ponto = Record<CampoHistorico, number | null> & { inicio: string; amostras: number }
+export type Ponto = Record<CampoNumerico, number | null> & {
+  inicio: string
+  amostras: number
+  chuva_detectada: 0 | 1 | null
+}
 export type Historico = { inicio: string; fim: string; intervalo_minutos: number; pontos: Ponto[] }
 
 export const metricasDoGrafico = [
   ...metricas,
-  { campo: 'chuva_detectada_pct', nome: 'Detecção de chuva', unidade: '%' },
+  { campo: 'chuva_detectada', nome: 'Detecção de chuva', unidade: '' },
 ] as const
 
 const horaLocal = new Intl.DateTimeFormat('pt-BR', {
@@ -63,7 +67,7 @@ export function demonstracao(periodo: Periodo): { leitura: Leitura; historico: H
       pressao_hpa: 931.5 + Math.sin(fase / 2) * 2.4 + oscilacao / 2,
       luminosidade_pct: Math.max(0, sol * 78 + oscilacao * 7),
       ldr_bruto: Math.max(0, sol * 2600 + oscilacao * 180),
-      chuva_detectada_pct: sol < -0.8 && Math.sin(fase / 4) > 0 ? 75 : 0,
+      chuva_detectada: sol < -0.8 && Math.sin(fase / 4) > 0 ? 1 : 0,
     })
   }
   const ultimo = pontos[pontos.length - 1]

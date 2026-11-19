@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from bson import ObjectId
@@ -121,9 +121,14 @@ def test_historico_retorna_medias_e_preserva_nulos(periodo, dias, intervalo):
             faixa = filtro["$or"][0]["coletado_em"]
             assert (faixa["$lt"] - faixa["$gte"]).days == dias
             assert pipeline[3]["$group"]["_id"]["$dateTrunc"]["binSize"] == intervalo
+            assert pipeline[1]["$set"]["chuva_valida"] == {"$eq": [{"$type": "$chuva_detectada"}, "bool"]}
+            assert pipeline[3]["$group"]["chuva_detectada"]["$top"]["sortBy"] == {
+                "chuva_valida": -1, "instante": -1, "_id": -1,
+            }
             assert maxTimeMS == 5000
+            inicio = datetime.now(timezone.utc)
             return CursorFake([{
-                "inicio": datetime.now(timezone.utc),
+                "inicio": inicio + timedelta(minutes=indice * intervalo),
                 "amostras": 2,
                 "temperatura_dht22_c": 23.8,
                 "temperatura_bmp180_c": None,
@@ -131,8 +136,8 @@ def test_historico_retorna_medias_e_preserva_nulos(periodo, dias, intervalo):
                 "pressao_hpa": None,
                 "luminosidade_pct": None,
                 "ldr_bruto": None,
-                "chuva_detectada_pct": 50.0,
-            }])
+                "chuva_detectada": chuva,
+            } for indice, chuva in enumerate((1, 0, None))])
 
     app.dependency_overrides[get_collection] = lambda: ColecaoHistorico()
     with TestClient(app) as client:
@@ -145,7 +150,7 @@ def test_historico_retorna_medias_e_preserva_nulos(periodo, dias, intervalo):
     assert dados["intervalo_minutos"] == intervalo
     assert dados["pontos"][0]["temperatura_dht22_c"] == 23.8
     assert dados["pontos"][0]["pressao_hpa"] is None
-    assert dados["pontos"][0]["chuva_detectada_pct"] == 50
+    assert [ponto["chuva_detectada"] for ponto in dados["pontos"]] == [1, 0, None]
 
 
 def test_historico_periodo_invalido():

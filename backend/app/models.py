@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -29,7 +30,7 @@ class IntervaloHistorico(BaseModel):
     pressao_hpa: float | None
     luminosidade_pct: float | None
     ldr_bruto: float | None
-    chuva_detectada_pct: float | None
+    chuva_detectada: Literal[0, 1] | None
 
 
 class HistoricoLeituras(BaseModel):
