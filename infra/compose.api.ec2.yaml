@@ -1,4 +1,4 @@
-# Implantação SOMENTE da API. Não modifica RabbitMQ, consumidor ou MongoDB existentes.
+# Implantação da API e do dashboard na EC2.
 services:
   api:
     image: ${IMAGE}
@@ -8,6 +8,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     networks:
+      - default
       - estacao_dados
     restart: unless-stopped
     healthcheck:
@@ -15,6 +16,15 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Defina FRONTEND_IMAGE}
+    container_name: estacao-dashboard
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
 
 networks:
   estacao_dados:

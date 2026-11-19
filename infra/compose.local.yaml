@@ -14,6 +14,10 @@ services:
     build: ../backend
     environment:
       MONGODB_URI: mongodb://mongodb-local:27017
+    networks:
+      default:
+        aliases:
+          - api
     depends_on:
       - mongodb-local
 
