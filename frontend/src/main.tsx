@@ -1,9 +1,10 @@
 import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HistoryChart } from './HistoryChart'
+import { StatisticsPanel } from './StatisticsPanel'
 import {
-  consultar, demonstracao, dia, hora, metricas, metricasDoGrafico, numero,
-  type CampoHistorico, type Historico, type Leitura, type Periodo,
+  consultar, demonstracao, dia, estatisticasDemo, hora, metricas, metricasDoGrafico, numero,
+  type CampoHistorico, type Estatisticas, type Historico, type Leitura, type Periodo,
 } from './weather'
 import './styles.css'
 
@@ -75,6 +76,11 @@ function App() {
   const amostra = useMemo(() => demo ? demonstracao(periodo) : null, [demo, periodo])
   const resultadoAtual = useConsulta<Leitura>('ultima', intervaloLeitura, !demo, revisao)
   const resultadoHistorico = useConsulta<Historico>(`historico?periodo=${periodo}`, intervaloHistorico, !demo, revisao)
+  const resultadoEstatisticas = useConsulta<Estatisticas>(`estatisticas?periodo=${periodo}&metrica=${campo}`, intervaloHistorico, !demo, revisao)
+  const estatisticas = useMemo(
+    () => amostra ? estatisticasDemo(amostra.historico.pontos, campo) : resultadoEstatisticas?.dados,
+    [amostra, campo, resultadoEstatisticas],
+  )
   const leitura = amostra?.leitura ?? resultadoAtual?.dados
   const historico = amostra?.historico ?? resultadoHistorico?.dados
   const instante = leitura?.coletado_em ? Date.parse(leitura.coletado_em) : NaN
@@ -96,6 +102,7 @@ function App() {
           <nav aria-label="Navegação principal">
             <a href="#leituras">Leituras</a>
             <a href="#historico">Histórico</a>
+            <a href="#estatisticas">Estatísticas</a>
             <a href="#localizacao">Localização</a>
           </nav>
           <span className="topo-local"><span className="pin" aria-hidden="true" /> São Paulo, SP</span>
@@ -204,6 +211,16 @@ function App() {
               <p className="chart-empty" role="status">{historico ? 'Nenhuma medição neste período.' : 'Carregando histórico…'}</p>
             )}
           </section>
+
+          <StatisticsPanel
+            key={`${periodo}-${campo}`}
+            dados={estatisticas}
+            erro={!demo && Boolean(resultadoEstatisticas?.erro)}
+            nome={metrica.nome}
+            unidade={metrica.unidade}
+            periodo={periodo}
+            chuva={campo === 'chuva_detectada'}
+          />
 
           <section id="localizacao" className="painel painel-mapa" aria-labelledby="titulo-mapa">
             <header className="painel-topo">

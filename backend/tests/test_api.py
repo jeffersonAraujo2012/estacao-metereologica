@@ -120,9 +120,9 @@ def test_historico_retorna_medias_e_preserva_nulos(periodo, dias, intervalo):
             assert filtro["estacao_id"] == "estacao-001"
             faixa = filtro["$or"][0]["coletado_em"]
             assert (faixa["$lt"] - faixa["$gte"]).days == dias
-            assert pipeline[3]["$group"]["_id"]["$dateTrunc"]["binSize"] == intervalo
-            assert pipeline[1]["$set"]["chuva_valida"] == {"$eq": [{"$type": "$chuva_detectada"}, "bool"]}
-            assert pipeline[3]["$group"]["chuva_detectada"]["$top"]["sortBy"] == {
+            assert pipeline[4]["$group"]["_id"]["$dateTrunc"]["binSize"] == intervalo
+            assert pipeline[3]["$set"]["chuva_valida"] == {"$eq": [{"$type": "$chuva_detectada"}, "bool"]}
+            assert pipeline[4]["$group"]["chuva_detectada"]["$top"]["sortBy"] == {
                 "chuva_valida": -1, "instante": -1, "_id": -1,
             }
             assert maxTimeMS == 5000
@@ -168,3 +168,65 @@ def test_historico_indisponivel():
     with TestClient(app) as client:
         resposta = client.get("/api/v1/leituras/historico")
     assert resposta.status_code == 503
+
+
+def test_estatisticas_de_medicao_numerica():
+    class ColecaoEstatisticas:
+        async def aggregate(self, pipeline, *, allowDiskUse, maxTimeMS):
+            assert allowDiskUse and maxTimeMS == 15000
+            filtro = pipeline[0]["$match"]
+            assert filtro["estacao_id"] == "estacao-001"
+            faixa = filtro["$or"][0]["coletado_em"]
+            assert (faixa["$lt"] - faixa["$gte"]).days == 7
+            janela = pipeline[5]["$setWindowFields"]["output"]
+            assert janela["posicao"] == {"$documentNumber": {}}
+            assert janela["desvio_padrao_amostral"]["$stdDevSamp"] == "$valor"
+            comum = {
+                "amostras": 4, "media": 3, "desvio_padrao_amostral": (20 / 3) ** 0.5,
+                "minimo": 0, "maximo": 6, "quantidade": 1,
+            }
+            return CursorFake([
+                {**comum, "_id": 0, "soma_centrais": 0, "quantidade_centrais": 0},
+                {**comum, "_id": 3, "soma_centrais": 2, "quantidade_centrais": 1},
+                {**comum, "_id": 6, "soma_centrais": 4, "quantidade_centrais": 1},
+                {**comum, "_id": 9, "soma_centrais": 0, "quantidade_centrais": 0},
+            ])
+
+    app.dependency_overrides[get_collection] = lambda: ColecaoEstatisticas()
+    with TestClient(app) as client:
+        resposta = client.get("/api/v1/leituras/estatisticas", params={
+            "metrica": "temperatura_dht22_c", "periodo": "7d", "estacao_id": "estacao-001",
+        })
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["amostras"] == 4
+    assert dados["media"] == 3
+    assert dados["mediana"] == 3
+    assert dados["desvio_padrao_amostral"] == pytest.approx((20 / 3) ** 0.5)
+    assert [faixa["quantidade"] for faixa in dados["histograma"]] == [1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+    assert dados["histograma"][-1]["fim"] == 6
+
+
+def test_estatisticas_de_chuva_contam_estados():
+    class ColecaoChuva:
+        async def aggregate(self, pipeline, *, maxTimeMS):
+            assert pipeline[3]["$match"] == {"$expr": {"$eq": [{"$type": "$chuva_detectada"}, "bool"]}}
+            return CursorFake([{"_id": 0, "quantidade": 8}])
+
+    app.dependency_overrides[get_collection] = lambda: ColecaoChuva()
+    with TestClient(app) as client:
+        resposta = client.get("/api/v1/leituras/estatisticas", params={"metrica": "chuva_detectada"})
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["amostras"] == 8
+    assert dados["media"] is None
+    assert dados["histograma"] == [
+        {"inicio": 0, "fim": 0, "quantidade": 8},
+        {"inicio": 1, "fim": 1, "quantidade": 0},
+    ]
+
+
+def test_estatisticas_metrica_invalida():
+    with criar_cliente([]) as client:
+        resposta = client.get("/api/v1/leituras/estatisticas", params={"metrica": "campo_inexistente"})
+    assert resposta.status_code == 422

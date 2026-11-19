@@ -3,6 +3,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+PeriodoLeituras = Literal["24h", "7d"]
+MetricaLeituras = Literal[
+    "temperatura_dht22_c", "temperatura_bmp180_c", "umidade_pct", "pressao_hpa",
+    "luminosidade_pct", "ldr_bruto", "chuva_detectada",
+]
+
 
 class Leitura(BaseModel):
     # Campos opcionais preservam compatibilidade com leituras antigas.
@@ -38,6 +44,20 @@ class HistoricoLeituras(BaseModel):
     fim: datetime
     intervalo_minutos: int
     pontos: list[IntervaloHistorico]
+
+
+class FaixaHistograma(BaseModel):
+    inicio: float
+    fim: float
+    quantidade: int
+
+
+class EstatisticasLeituras(BaseModel):
+    amostras: int = 0
+    media: float | None = None
+    mediana: float | None = None
+    desvio_padrao_amostral: float | None = None
+    histograma: list[FaixaHistograma]
 
 
 def normalizar_leitura(documento: dict) -> Leitura:

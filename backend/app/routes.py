@@ -1,12 +1,15 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pymongo import DESCENDING
 from pymongo.errors import PyMongoError
 
 from app.db import get_collection
-from app.models import HistoricoLeituras, Leitura, normalizar_leitura
+from app.estatisticas import resumir_leituras
+from app.models import (
+    EstatisticasLeituras, HistoricoLeituras, Leitura, MetricaLeituras, PeriodoLeituras, normalizar_leitura,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["Leituras"])
 
@@ -41,16 +44,7 @@ async def listar_leituras(
     return documentos
 
 
-@router.get("/leituras/historico", response_model=HistoricoLeituras)
-async def obter_historico(
-    response: Response,
-    periodo: Literal["24h", "7d"] = "24h",
-    estacao_id: Annotated[str | None, Query(max_length=100)] = None,
-    colecao=Depends(get_collection),
-):
-    intervalo = 15 if periodo == "24h" else 60
-    fim = datetime.now(timezone.utc)
-    inicio = fim - timedelta(days=1 if periodo == "24h" else 7)
+def filtrar_periodo(inicio: datetime, fim: datetime, estacao_id: str | None) -> list[dict]:
     # A faixa inicial usa o campo original para aproveitar o índice. Para textos
     # ISO-8601 UTC, inclui os segundos de borda e refina a faixa após a conversão.
     formato_segundo = "%Y-%m-%dT%H:%M:%S"
@@ -65,20 +59,32 @@ async def obter_historico(
     }
     if estacao_id:
         filtro["estacao_id"] = estacao_id
+    return [
+        {"$match": filtro},
+        {"$set": {"instante": {
+            "$convert": {"input": "$coletado_em", "to": "date", "onError": None, "onNull": None},
+        }}},
+        {"$match": {"instante": {"$gte": inicio, "$lt": fim}}},
+    ]
 
+
+@router.get("/leituras/historico", response_model=HistoricoLeituras)
+async def obter_historico(
+    response: Response,
+    periodo: PeriodoLeituras = "24h",
+    estacao_id: Annotated[str | None, Query(max_length=100)] = None,
+    colecao=Depends(get_collection),
+):
+    intervalo = 15 if periodo == "24h" else 60
+    fim = datetime.now(timezone.utc)
+    inicio = fim - timedelta(days=1 if periodo == "24h" else 7)
     campos = (
         "temperatura_dht22_c", "temperatura_bmp180_c", "umidade_pct",
         "pressao_hpa", "luminosidade_pct", "ldr_bruto",
     )
     pipeline = [
-        {"$match": filtro},
-        {"$set": {
-            "instante": {
-                "$convert": {"input": "$coletado_em", "to": "date", "onError": None, "onNull": None},
-            },
-            "chuva_valida": {"$eq": [{"$type": "$chuva_detectada"}, "bool"]},
-        }},
-        {"$match": {"instante": {"$gte": inicio, "$lt": fim}}},
+        *filtrar_periodo(inicio, fim, estacao_id),
+        {"$set": {"chuva_valida": {"$eq": [{"$type": "$chuva_detectada"}, "bool"]}}},
         {"$group": {
             "_id": {"$dateTrunc": {"date": "$instante", "unit": "minute", "binSize": intervalo}},
             "amostras": {"$sum": 1},
@@ -105,3 +111,22 @@ async def obter_historico(
 
     response.headers["Cache-Control"] = "public, max-age=60"
     return HistoricoLeituras(inicio=inicio, fim=fim, intervalo_minutos=intervalo, pontos=pontos)
+
+
+@router.get("/leituras/estatisticas", response_model=EstatisticasLeituras)
+async def obter_estatisticas(
+    response: Response,
+    metrica: MetricaLeituras,
+    periodo: PeriodoLeituras = "24h",
+    estacao_id: Annotated[str | None, Query(max_length=100)] = None,
+    colecao=Depends(get_collection),
+):
+    fim = datetime.now(timezone.utc)
+    inicio = fim - timedelta(days=1 if periodo == "24h" else 7)
+    try:
+        estatisticas = await resumir_leituras(colecao, filtrar_periodo(inicio, fim, estacao_id), metrica)
+    except PyMongoError as erro:
+        raise HTTPException(status_code=503, detail="Estatísticas indisponíveis") from erro
+
+    response.headers["Cache-Control"] = "public, max-age=60"
+    return estatisticas
