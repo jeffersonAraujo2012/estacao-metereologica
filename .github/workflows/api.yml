@@ -92,6 +92,7 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_KEY_PASSPHRASE: ${{ secrets.EC2_SSH_KEY_PASSPHRASE }}
           EC2_SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
         run: |
           : "${EC2_HOST:?Configure EC2_HOST}" "${EC2_USER:?Configure EC2_USER}"
@@ -103,11 +104,30 @@ jobs:
           umask 077
           printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > "$ssh_dir/key"
           printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          ssh_options=(-i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes
+          unset EC2_SSH_PRIVATE_KEY
+
+          agent_env=$(ssh-agent -s -a "$ssh_dir/agent.sock")
+          eval "$agent_env" >/dev/null
+          trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -rf "$ssh_dir"' EXIT
+          cat > "$ssh_dir/askpass" <<'ASKPASS'
+          #!/bin/sh
+          # Stop ssh-add from retrying the same incorrect passphrase.
+          [ -n "${EC2_SSH_KEY_PASSPHRASE:-}" ] && [ ! -e "$0.used" ] || exit 1
+          : > "$0.used"
+          printf '%s\n' "$EC2_SSH_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$ssh_dir/askpass"
+          if ! SSH_ASKPASS="$ssh_dir/askpass" SSH_ASKPASS_REQUIRE=force ssh-add -q "$ssh_dir/key" </dev/null; then
+            printf 'Não foi possível carregar EC2_SSH_PRIVATE_KEY. Se a chave estiver cifrada, confira EC2_SSH_KEY_PASSPHRASE.\n' >&2
+            exit 1
+          fi
+          unset EC2_SSH_KEY_PASSPHRASE
+          ssh-add -L > "$ssh_dir/key.pub"
+          ssh-keygen -lf "$ssh_dir/key.pub"
+
+          ssh_options=(-i "$ssh_dir/key.pub" -o IdentitiesOnly=yes -o "IdentityAgent=$SSH_AUTH_SOCK" -o BatchMode=yes
             -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts"
             -o ConnectTimeout=15)
-          ssh-keygen -y -P '' -f "$ssh_dir/key" > "$ssh_dir/key.pub"
-          ssh-keygen -lf "$ssh_dir/key.pub"
           target="$EC2_USER@$EC2_HOST"
 
           compose_file="compose-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.yaml"
