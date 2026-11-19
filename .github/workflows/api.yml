@@ -146,10 +146,12 @@ jobs:
           mv -f -- "$compose_file" compose.yaml
           "${compose[@]}" -f compose.yaml up -d --no-deps api frontend
 
+          dashboard_binding=$("${compose[@]}" -f compose.yaml port frontend 80)
+          dashboard_port=${dashboard_binding##*:}
           for url in \
             http://127.0.0.1:8000/ready \
-            http://127.0.0.1:8080/ \
-            'http://127.0.0.1:8080/api/v1/leituras?limite=1'; do
+            "http://127.0.0.1:$dashboard_port/" \
+            "http://127.0.0.1:$dashboard_port/api/v1/leituras?limite=1"; do
             printf 'Verificando %s\n' "$url"
             curl --fail --silent --show-error --retry 12 --retry-delay 5 \
               --retry-all-errors --retry-max-time 60 --max-time 10 --output /dev/null "$url"
