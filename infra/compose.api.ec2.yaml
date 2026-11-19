@@ -1,0 +1,22 @@
+# Implantação SOMENTE da API. Não modifica RabbitMQ, consumidor ou MongoDB existentes.
+services:
+  api:
+    image: ${IMAGE}
+    container_name: estacao-api
+    env_file:
+      - /opt/estacao-api/.env
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - estacao_dados
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  estacao_dados:
+    external: true
+    name: ${EXTERNAL_DOCKER_NETWORK}

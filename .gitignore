@@ -1,0 +1,27 @@
+# Configuração local e credenciais
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/

@@ -1,0 +1,12 @@
+services:
+  mongodb-local:
+    image: mongo:7
+    container_name: estacao-mongo-local
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_local_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_local_data:
